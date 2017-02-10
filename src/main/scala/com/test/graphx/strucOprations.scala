@@ -51,7 +51,7 @@ object strucOprations {
     ).collect.foreach(println(_))
 
     // ==========================================================
-    // subgraph
+    // reverse
     // ==========================================================
     val reverseGraph = graph.reverse
 
@@ -72,9 +72,9 @@ object strucOprations {
 
   }
 
-  def printGraph(inputGraph: Graph[]): Unit = {
+  def printGraph(inputGraph: Graph[(String, String), String]): Unit = {
     inputGraph.triplets.map(
-    triplet => triplet.srcAttr._1 + " is the " + triplet.attr + " of " + triplet.dstAttr._1
+      triplet => triplet.srcAttr._1 + " is the " + triplet.attr + " of " + triplet.dstAttr._1
     ).collect.foreach(println(_))
   }
 

@@ -2,5 +2,5 @@
 > created by hjw
 
 ## Introduction
-This project is to test the examples in official site of spark which presents [grphaX](http://spark.apache.org/docs/latest/graphx-programming-guide.html)
+This project is to test the examples in official site of spark which presents [graphX](http://spark.apache.org/docs/latest/graphx-programming-guide.html)
 
