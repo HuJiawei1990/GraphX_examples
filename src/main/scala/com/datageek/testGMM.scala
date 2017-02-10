@@ -1,4 +1,4 @@
-package com.datageek.mllib
+package com.datageek
 
 /**
   * Created by Administrator on 2017/2/10.
@@ -9,11 +9,11 @@ import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.log4j.{Level, Logger}
 
 object testGMM {
+  Logger.getLogger("org").setLevel(Level.WARN)
   // spark initialization
   val conf  = new SparkConf().setAppName("GMM").setMaster("local")
   val sc = new SparkContext(conf)
 
-  Logger.getLogger("org").setLevel(Level.WARN)
 
   def main(arg: Array[String]): Unit = {
     // Load and parse the data
@@ -31,9 +31,10 @@ object testGMM {
         (gmm.weights(i), gmm.gaussians(i).mu, gmm.gaussians(i).sigma))
     }
 
-    val numClass = gmm.k
-    // val gmm_clusters = new kMeansModel().
+    val preds = gmm.predict(parsedData)
+    // preds.collect.map(println(_))
 
+    val numClass = gmm.k
 
   }
 }

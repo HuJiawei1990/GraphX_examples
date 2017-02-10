@@ -56,7 +56,7 @@ object strucOprations {
     val reverseGraph = graph.reverse
 
     // ==========================================================
-    // subgraph
+    // sub-graph
     // ==========================================================
 
     // Remove missing vertices as well as the edges to connected to them
