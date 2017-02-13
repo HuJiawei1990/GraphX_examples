@@ -100,7 +100,7 @@ object generateIdGraph {
     val myIdValue = "D0BA55FB-3216-407D-95B0-B9C2C8BFF323"
 
     val selectedGraph = nonDirectedGraph.subgraph(
-      vpred = (id, attr) => attr._2 == myIdValue
+      vpred = (id, attr) => attr._4 == myIdValue
     )
 
     if (testMode == 1) {
