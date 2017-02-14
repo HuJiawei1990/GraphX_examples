@@ -6,10 +6,11 @@ package com.datageek
 import org.apache.spark.SparkConf
 import org.apache.spark.SparkContext
 import org.apache.spark.graphx._
-import org.apache.log4j.{Logger, Level}
+import org.apache.log4j.{Level, Logger}
 import org.apache.spark.rdd.RDD
-
 import org.apache.spark.graphx.GraphLoader
+
+import scala.reflect.ClassTag
 
 object generateIdGraph {
   Logger.getLogger("org").setLevel(Level.WARN)
@@ -57,7 +58,7 @@ object generateIdGraph {
       line => val fields = line.split(",")
         Edge( fields(1).toLong,           // source node ID
         fields(2).toLong,                 // destination node ID
-        firstTypeEdgeWeight                                 // relationship type => from the same table
+        firstTypeEdgeWeight               // relationship type => from the same table
       )
     }
 
@@ -67,9 +68,10 @@ object generateIdGraph {
       line => val fields = line.split(",")
         Edge( fields(1).toLong,             // source node ID
           fields(2).toLong,                 // destination node ID
-          secondTypeEdgeWeight                                 // relationship type => from the same table
+          secondTypeEdgeWeight              // relationship type => from the same table
         )
     }
+
     if (testMode == 1) {
       println("********** hjw test info **********")
       println("*** There are " + IdPairs1.count() + " connections of type 1.")
@@ -99,6 +101,8 @@ object generateIdGraph {
       println("********** hjw test info **********")
       println("*** There are " + nonDirectedGraph.edges.count() + " connections in final graph.")
     }
+
+    /*
     // ====================================
     // ====== first exploration
     // ====================================
@@ -111,7 +115,6 @@ object generateIdGraph {
       epred = e => e.srcAttr._4 == myIdValue
     )
 
-    //val selectedVertices = nonDirectedGraph.collectNeighbors(EdgeDirection.Either).lookup(8L)
     // initialization
     var selectedVertices = nonDirectedGraph.triplets.collect {
       case triplet if triplet.srcAttr._4 == myIdValue && triplet.dstAttr._4 != myIdValue
@@ -129,14 +132,19 @@ object generateIdGraph {
             " in column " + vertex._2._2 + " with value " + vertex._2._4
       }.collect().map(println(_))
     }
-
+    */
 
     // ===========================================
-    // ===== test shortest path algo
+    // ===== test shortest path algorithm
+    // ===== count the jump times between tables when join
     // ===========================================
 
     // define a source vertex, and we will find shortest path from this source to all other vertices
 
+    // Define a initial graph which has the same structure with the original graph
+    // vertices has one attribute at beginning
+    // for source Vertex ID => 0.0
+    // for the others       => Inf
     val initialGraph = nonDirectedGraph.mapVertices(
       (id, _) =>
         if (id == sourceId) 0.0
@@ -144,36 +152,39 @@ object generateIdGraph {
     )
 
     // find the shortest path
+    // we can define the weight for different edge types
+    // we store the min sum of edge-weights from the source vertex to destination vertex
+    // if there is path link them
+    // Otherwise, we store the sum as Double.positiveInfinity
     val shortestPathGraph = initialGraph.pregel(Double.PositiveInfinity)(
       (id, dst, newDst) => math.min(dst, newDst),
       triplet => {  // Send Message
         if (triplet.srcAttr + triplet.attr < triplet.dstAttr) {
           Iterator((triplet.dstId, triplet.srcAttr + triplet.attr))
         } else {
-          Iterator.empty
-        }
+          Iterator.empty }
       },
       (a, b) => math.min(a, b) // Merge Message
     )
 
-    val connectedVertices = shortestPathGraph.vertices.filter {
-      case (id, pathLength) => pathLength < Double.PositiveInfinity
-    }
-
-    //shortestPathGraph.outerJoinVertices(nonDirectedGraph.vertices)
-
     if (testMode > 1){
+      val connectedVertices = shortestPathGraph.vertices.filter {
+        case (id, pathLength) => pathLength < Double.PositiveInfinity
+      }
+
       println("********** hjw test info **********")
       println("*** There are " + connectedVertices.count() + " vertices connected to vertex ID = " + sourceId)
       println(connectedVertices.collect.mkString("\n"))
     }
 
-    var connectedVerticesAllInfo = nonDirectedGraph.outerJoinVertices(shortestPathGraph.vertices){
-      case (vid, (attr1, attr2, attr3, attr4), Some(pathLength)) => (attr1, attr2, attr3, attr4, pathLength)
+    // add the min sum of edge-weights as a new attribute into vertex.attr
+    // filter all vertices whose new attribute < inf
+    // it means these vertices are connected to the
+    val connectedVerticesAllInfo = nonDirectedGraph.outerJoinVertices(shortestPathGraph.vertices){
+      case (vid, attr, Some(pathLength)) => (attr, pathLength)
     }.vertices.filter {
-      case (_, attr) => attr._5 < Double.PositiveInfinity
+      case (_, attr) => attr._2 < Double.PositiveInfinity
     }
-
 
     if (testMode == 1){
       println("********** hjw debug info **********")
@@ -181,8 +192,11 @@ object generateIdGraph {
       println(connectedVerticesAllInfo.collect.mkString("\n"))
     }
 
+    // =====================================
+    // ===== filter by ID type
+    // =====================================
     val connectedVerticesType = connectedVerticesAllInfo.filter {
-        case (id, attr) => attr._3 == myIdType
+        case (id, attr) => attr._1._3 == myIdType
     }
 
     if (testMode == 1){
@@ -192,33 +206,35 @@ object generateIdGraph {
       println(connectedVerticesType.collect.mkString("\n"))
     }
 
-    // generateShortestPathGraph(srcGraph = nonDirectedGraph, srcId = 8L)
-
-    /*
-    def generateShortestPathGraph(srcGraph: Graph[VD, Int] , srcId: VertexId): Graph[Double, Int] = {
-      val initialGraph = srcGraph.mapVertices(
-        (id, _) =>
-          if (id == sourceId) 0.0
-          else Double.PositiveInfinity
-      )
-
-      val shortestPathGraph = initialGraph.pregel(Double.PositiveInfinity)(
-        (id, dst, newDst) => math.min(dst, newDst),
-          triplet => {  // Send Message
-            if (triplet.srcAttr + triplet.attr < triplet.dstAttr) {
-              Iterator((triplet.dstId, triplet.srcAttr + triplet.attr))
-            } else {
-            Iterator.empty
-            }
-          },
-        (a, b) => math.min(a, b) // Merge Message
-      )
-
-      shortestPathGraph.subgraph(
-        vpred = (id, pathLength) => pathLength < Double.PositiveInfinity
-      )
-    }
-    */
-
   }
+
+  /*
+  def generateShortestPathGraph(srcGraph: Graph[VD, Int] , srcId: VertexId): Graph[VD, Int] = {
+    val initialGraph = srcGraph.mapVertices(
+      (id, _) =>
+        if (id == srcId) 0.0
+        else Double.PositiveInfinity
+    )
+
+    val shortestPathGraph = initialGraph.pregel(Double.PositiveInfinity)(
+      (id, dst, newDst) => math.min(dst, newDst),
+        triplet => {  // Send Message
+          if (triplet.srcAttr + triplet.attr < triplet.dstAttr) {
+            Iterator((triplet.dstId, triplet.srcAttr + triplet.attr))
+          } else {
+          Iterator.empty
+          }
+        },
+      (a, b) => math.min(a, b) // Merge Message
+    )
+
+    // join the path length param to the source graph
+    // add the path length as a new attribute into all vertices
+    srcGraph.outerJoinVertices(shortestPathGraph.vertices){
+      case (vid, attr, Some(pathLength)) => (attr, pathLength)
+    }.vertices.filter {
+      case (_, attr) => attr._2 < Double.PositiveInfinity
+    }
+  }
+  */
 }
