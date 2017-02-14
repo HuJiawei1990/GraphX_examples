@@ -15,11 +15,17 @@ object generateIdGraph {
   Logger.getLogger("org").setLevel(Level.WARN)
   val testMode = 1
   val debugMode = 0
+  val firstTypeEdgeWeight = 0
+  val secondTypeEdgeWeight = 1
 
   def main(args: Array[String]) : Unit = {
     // spark initialization
     val conf = new SparkConf().setAppName("generateTCUSTOMERId").setMaster("local")
     val sc = new SparkContext(conf)
+
+    val sourceId : VertexId = 2L
+    //val myIdType = "CUST_ID"
+    val myIdType = "MOBILE"
 
     // ============================================
     // =========== Load graph from files ==========
@@ -38,7 +44,7 @@ object generateIdGraph {
     }
 
     if (testMode == 1){
-      println("********** hjw debug info **********")
+      println("********** hjw test info **********")
       println("*** There are " + allId.count() + " nodes.")
     }
 
@@ -51,7 +57,7 @@ object generateIdGraph {
       line => val fields = line.split(",")
         Edge( fields(1).toLong,           // source node ID
         fields(2).toLong,                 // destination node ID
-        1                                 // relationship type => from the same table
+        firstTypeEdgeWeight                                 // relationship type => from the same table
       )
     }
 
@@ -61,11 +67,11 @@ object generateIdGraph {
       line => val fields = line.split(",")
         Edge( fields(1).toLong,             // source node ID
           fields(2).toLong,                 // destination node ID
-          2                                 // relationship type => from the same table
+          secondTypeEdgeWeight                                 // relationship type => from the same table
         )
     }
     if (testMode == 1) {
-      println("********** hjw debug info **********")
+      println("********** hjw test info **********")
       println("*** There are " + IdPairs1.count() + " connections of type 1.")
       println("*** There are " + IdPairs2.count() + " connections of type 2.")
     }
@@ -86,10 +92,11 @@ object generateIdGraph {
       details.collect().map(println(_))
     }
 
+    // create the non-directed graph by adding the reverse of the original graph
     val nonDirectedGraph = Graph(graph.vertices, graph.edges.union(graph.reverse.edges), defaultId)
 
     if (testMode == 1) {
-      println("********** hjw debug info **********")
+      println("********** hjw test info **********")
       println("*** There are " + nonDirectedGraph.edges.count() + " connections in final graph.")
     }
     // ====================================
@@ -99,20 +106,119 @@ object generateIdGraph {
     // for a given ID value, find all its connected components
     val myIdValue = "D0BA55FB-3216-407D-95B0-B9C2C8BFF323"
 
-    val selectedGraph = nonDirectedGraph.subgraph(
-      vpred = (id, attr) => attr._4 == myIdValue
+    var selectedGraph = nonDirectedGraph.subgraph(
+      //vpred = (id, attr) => attr._4 == myIdValue,
+      epred = e => e.srcAttr._4 == myIdValue
     )
 
-    if (testMode == 1) {
+    //val selectedVertices = nonDirectedGraph.collectNeighbors(EdgeDirection.Either).lookup(8L)
+    // initialization
+    var selectedVertices = nonDirectedGraph.triplets.collect {
+      case triplet if triplet.srcAttr._4 == myIdValue && triplet.dstAttr._4 != myIdValue
+      => (triplet.dstId, triplet.dstAttr)
+    }
+
+    if (testMode > 1) {
       println("********** hjw debug info **********")
       println("*** all IDs connected with ID value = " + myIdValue)
-      selectedGraph.vertices.map{
+      println("*** there are " + selectedVertices.count() + " neighbours.")
+      //selectedGraph.vertices.map{
+      selectedVertices.map {
         vertex =>
           "Vertex ID " + vertex._1 + " from table " + vertex._2._1 +
             " in column " + vertex._2._2 + " with value " + vertex._2._4
       }.collect().map(println(_))
     }
 
+
+    // ===========================================
+    // ===== test shortest path algo
+    // ===========================================
+
+    // define a source vertex, and we will find shortest path from this source to all other vertices
+
+    val initialGraph = nonDirectedGraph.mapVertices(
+      (id, _) =>
+        if (id == sourceId) 0.0
+        else Double.PositiveInfinity
+    )
+
+    // find the shortest path
+    val shortestPathGraph = initialGraph.pregel(Double.PositiveInfinity)(
+      (id, dst, newDst) => math.min(dst, newDst),
+      triplet => {  // Send Message
+        if (triplet.srcAttr + triplet.attr < triplet.dstAttr) {
+          Iterator((triplet.dstId, triplet.srcAttr + triplet.attr))
+        } else {
+          Iterator.empty
+        }
+      },
+      (a, b) => math.min(a, b) // Merge Message
+    )
+
+    val connectedVertices = shortestPathGraph.vertices.filter {
+      case (id, pathLength) => pathLength < Double.PositiveInfinity
+    }
+
+    //shortestPathGraph.outerJoinVertices(nonDirectedGraph.vertices)
+
+    if (testMode > 1){
+      println("********** hjw test info **********")
+      println("*** There are " + connectedVertices.count() + " vertices connected to vertex ID = " + sourceId)
+      println(connectedVertices.collect.mkString("\n"))
+    }
+
+    var connectedVerticesAllInfo = nonDirectedGraph.outerJoinVertices(shortestPathGraph.vertices){
+      case (vid, (attr1, attr2, attr3, attr4), Some(pathLength)) => (attr1, attr2, attr3, attr4, pathLength)
+    }.vertices.filter {
+      case (_, attr) => attr._5 < Double.PositiveInfinity
+    }
+
+
+    if (testMode == 1){
+      println("********** hjw debug info **********")
+      println("*** There are " + connectedVerticesAllInfo .count() + " vertices connected to vertex ID = " + sourceId)
+      println(connectedVerticesAllInfo.collect.mkString("\n"))
+    }
+
+    val connectedVerticesType = connectedVerticesAllInfo.filter {
+        case (id, attr) => attr._3 == myIdType
+    }
+
+    if (testMode == 1){
+      println("********** hjw test info **********")
+      println("*** There are " + connectedVerticesType .count() + " vertices connected to vertex ID = "
+        + sourceId + " with type " + myIdType )
+      println(connectedVerticesType.collect.mkString("\n"))
+    }
+
+    // generateShortestPathGraph(srcGraph = nonDirectedGraph, srcId = 8L)
+
+    /*
+    def generateShortestPathGraph(srcGraph: Graph[VD, Int] , srcId: VertexId): Graph[Double, Int] = {
+      val initialGraph = srcGraph.mapVertices(
+        (id, _) =>
+          if (id == sourceId) 0.0
+          else Double.PositiveInfinity
+      )
+
+      val shortestPathGraph = initialGraph.pregel(Double.PositiveInfinity)(
+        (id, dst, newDst) => math.min(dst, newDst),
+          triplet => {  // Send Message
+            if (triplet.srcAttr + triplet.attr < triplet.dstAttr) {
+              Iterator((triplet.dstId, triplet.srcAttr + triplet.attr))
+            } else {
+            Iterator.empty
+            }
+          },
+        (a, b) => math.min(a, b) // Merge Message
+      )
+
+      shortestPathGraph.subgraph(
+        vpred = (id, pathLength) => pathLength < Double.PositiveInfinity
+      )
+    }
+    */
 
   }
 }
