@@ -182,6 +182,7 @@ object generateIdGraph {
     // it means these vertices are connected to the
     val connectedVerticesAllInfo = nonDirectedGraph.outerJoinVertices(shortestPathGraph.vertices){
       case (vid, attr, Some(pathLength)) => (attr, pathLength)
+      case (vid, attr, None) => (attr, Double.PositiveInfinity)
     }.vertices.filter {
       case (_, attr) => attr._2 < Double.PositiveInfinity
     }
